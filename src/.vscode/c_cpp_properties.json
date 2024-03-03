@@ -1,7 +1,7 @@
 {
     "configurations": [
         {
-            "name": "Linux",
+            "name": "MacOSX",
             "includePath": [
                 "${workspaceFolder}/**",
                 "${env:PICO_SDK_PATH}/src/rp2_common/hardware_gpio/include"
@@ -10,7 +10,7 @@
             "compilerPath": "/usr/bin/gcc",
             "cStandard": "c17",
             "cppStandard": "gnu++17",
-            "intelliSenseMode": "linux-gcc-x64",
+            "intelliSenseMode": "macos-clang-arm64",
             "configurationProvider": "ms-vscode.cmake-tools"
         }
     ],
