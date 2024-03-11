@@ -31,7 +31,7 @@ I am using Visual Studio Code and the following plugins:
 
 ### Build
 Building this emulator is straightforward. Create (mkdir) and then cd to a **build** subfolder, then run `cmake ..`
-Please see the `CMakeLists.txt` file in case you do not want Simon's Basic support. You can simply remove `_SIMONS_BASIC` from the compile definition list.  
+Please see the `CMakeLists.txt` file in case you do not want Simon's Basic or monitor support. You can simply remove `_SIMONS_BASIC` from the compile definition list.  
 
 ## ROMs
 Due to copyright reasons, I cannot include the C-64 bios files "basic", "kernal" and "chargen". So please use e.g. the tool "bin2hdr" from Veselin Sladkov [Reload-Emulator](https://github.com/vsladkov/reload-emulator)) to convert your C-64 rom files to 
@@ -51,11 +51,12 @@ This was a very popular expanded basic for the C-64. I also included support for
 <ul>
   <li>simons_basic.hxx</li>
 </ul><br>
-
+In case you have licensed Simon's Basic, you can enable this module within the `CMakeLists.txt`. It is switched off by default.
 In order to boot Simon's Basic, you have to enter `POKE 32776,48` and then restart the C-64 by typing `SYS 64738`. You will be presented the welcome screen. Here you can type `OLD` to recover the basic program. Then enter `LIST` to edit it or `RUN` to start it.
 
 ### Monitor
 I included a small machine code monitor at $c000 (`SYS 49152`).
+You can enable this module within the `CMakeLists.txt`. It is switched off by default.
 
 ## Sound
 There is no sound yet.
@@ -64,10 +65,10 @@ There is no sound yet.
 DVI output is now implemented for all official C-64 VIC modes, textmode, multicolor textmode, hires, hires multicolor and extended color mode (ECM) . The design also supports fli support. No support for sprites or bitscrolling yet. The resolution used is a "quirk mode" of 340x240 and may not run on every display. You can enforce using a 640x480 mode by changing a single line of code in case you prefer a more safe timing.
 
 ## Input
-Keyboard input is currently handled by directly attaching a usb keyboard. There is currently no USB-hub supported, so you have to connect your USB keyboard directly.
+Keyboard input is currently handled by directly attaching a usb keyboard. There is currently no USB-hub supported, so you have to connect your USB keyboard directly. I am using the keyboard of the RaspberryPi foundation.
 
 ## WIP
-This is work in progress and is set up for fun. I will continue to improve the emulation. Next is a better keyboard support via CIA#1.
+This is work in progress and is set up for fun. I will continue to improve the emulation. Next is joystick support.
 
 ## How does it look?
 * This is how it currently looks like:

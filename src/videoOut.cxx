@@ -3,19 +3,7 @@
  * Written by Bernd Krekeler, Herne, Germany
  * 
 */
-
-#include <stdlib.h>
-#include <pico/stdlib.h>
-#include <pico/multicore.h>
-#include <dvi.h>
-#include <hardware/vreg.h>
-#include <memory.h>
-#include "logging.hxx"
-#include "rp65c02.hxx"
-#include "cia6526.hxx"
-#include "vic6569.hxx"
-#include "videoOut.hxx"
-#include "rpPetra.hxx"
+#include "stdinclude.hxx"
 
 const int LAST_FRAMEBUFFER_LINE=240;
 
@@ -96,7 +84,7 @@ static void __not_in_flash_func(beamRace)(void)
     leftBorderEnd=28;
   }
   bool isScreenSwitchedOff=((currentBeamPos<=upperBorderStop) || (currentBeamPos>=lowerBorderStart) || !(_pGlue->m_pVICII->m_registerSetRead[0x11] & 0x10));
-
+  
   uint16_t color=colorIndex[(_pGlue->m_pVICII->m_registerSetRead[0x20]) & 0x0f];
   uint32_t *pP=(uint32_t *)pScanLine;
   

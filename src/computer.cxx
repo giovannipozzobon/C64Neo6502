@@ -2,87 +2,38 @@
  * Written by Bernd Krekeler, Herne, Germany
  * 
 */
-
-#include <hardware/gpio.h>
-#include <hardware/adc.h>
-#include <pico/stdlib.h>
-#include <bsp/board_api.h>
-#include <pico/bootrom.h>
-#include <tusb.h>
-#include <dvi.h>
-#include <dvi_serialiser.h>
-#include "logging.hxx"
-#include "rp65c02.hxx"
-#include "cia6526.hxx"
-#include "vic6569.hxx"
-#include "videoOut.hxx"
-#include "rpPetra.hxx"
-#include "computer.hxx"
-
-/*
-    Keyboard mappings are incomplete/wrong and have been implemented to at least
-    be able to test some basic code. Code will later be replaced by real CIA#1 emulation.
-
-*/
-
-static const uint8_t _keyboard_mapping[]={0,0,0,0,65,66,67,68,69,70, //0 
-                                     71,72,73,74,75,76,77,78,79,80, // 10
-                                     81,82,83,84,85,86,87,88,89,90, // 20  (Z)
-                                     49,50,51,52,53,54,55,56,57,48, // 30 (1)
-                                     13,0x83,20,58,32,0,19 /* HOME */,41,0,61, //40, 43==CTRL(58)
-                                     0,58,59,0,44,0,0,0,0,0, // 50
-                                     0,0,0,0,0,0,0,0,0,0, // 60
-                                     0,0,0,0,0,0,0,0,0, 29/* CRSR right */, // 70
-                                     157 /* CRSR left */,17 /* CRSR down */,145 /* CRSR up */,0,0,0,0,0,0,0x31, // 80 
-                                     0x32,59,8,11,16,19,24,27,32,35, // 90
-                                     0,0,0,0,0,0,0,0,0,0, // 100
-                                     0,0,0,0,0,0,0,0,0,0, // 110
-                                     0,0,0,0,0,0,0};
-
-static const uint8_t _keyboard_mapping_shift[]={0,0,0,0,65,66,67,68,69,70, //0 
-                                     71,72,73,74,75,76,77,78,79,80, // 10
-                                     81,82,83,84,85,86,87,88,89,90, // 20  (Z)
-                                     33,34,35,36,37,38,39,40,41,61, // 30, !
-                                     34,0x83,20,0,32,0,147 /*(CLR/HOME)*/,41,0,0, //40
-                                     0,58,0,0,44,0,0,0,0,0, // 50
-                                     0,0,0,0,0,0,0,0,0,0, // 60
-                                     0,0,0,0,0,0,0,0,0,0, // 70
-                                     0,0,0,0,0,0,0,0,0,0x31, // 80 
-                                     0x32,59,8,11,16,19,24,27,32,35, // 90
-                                     0,0,0,0,0,0,0,0,0,0, // 100
-                                     0,0,0,0,0,0,0,0,0,0, // 110
-                                     0,0,0,0,0,0,0};
+#include "stdinclude.hxx"
 
 
-static const uint8_t _keyboard_mapping_ctrl[]={0,0,0,0,0,0,0,0,0,0, // 0
-                                                0,0,0,0,0,0,0,0,0,0, // 10
-                                                0,0,0,0,0,0,0,0,0,0, // 20 
-                                                0x1c,0x05,28,0x9f,0x9c,30,158,0x0a,0x12,0x92, // 30
-                                                0,0x13,0,0,0,0,0,0,0,0, // 0x13=Home
-                                                0,0,0,0,0,0,0,0,0,0,
-                                                0,0,0,0,0,0,0,0,0,0,
-                                                0,0,0,0,0,0,0,0,0,0,
-                                                0,0,0,0,0,0,0,0,0,0,
-                                                0,0,0,0,0,0,0,0,0,0,
-                                                0,0,0,0,0,0,0,0,0,0,
-                                                0,0,0,0,0,0,0,0,0,0,
-                                                0,0,0,0,0,0,0,0,0,0,
-                                                0,0,0,0,0,0,0,0};
+// Y (direction of the keyboard matrix)- ROW
+static const u_int8_t keyboardMapRow[]={0,0,0,0,0xfd,0xf7,0xfb,0xfb,0xfd,0xfb, // 0 (4="A..F")
+                                     0xf7,0xf7,0xef,0xef,0xef,0xdf,0xef,0xef,0xef,0xdf,    // 10 ("G..P")
+                                     0x7f,0xfb,0xfd,0xfb,0xf7,0xf7,0xfd,0xfb,0xf7,0xfd, // 20 ("Q..Z")
+                                     0x7f,0x7f,0xfd,0xfd,0xfb,0xfb,0xf7,0Xf7,0xef,0xef, // 30 ("1..0")
+                                     0xfe,0x7f,0xfe,0x7f,0x7f,0xdf,0xf7,0xdf,0xbf,0xbf, // 40 (41=RS, 44=SPC)
+                                     0,0xdf,0xbf,0x7f,0xdf,0xdf,0xbf,0,0xfe,0xfe, // 50
+                                     0xfe,0xfe,0,0,0,0,0xbf,0xbf,0,0, // 60
+                                     0xbf,0,0,0,0,0,0,0,0,0xfe, // 70
+                                     0xfe,0xfe,0xfe,0,0,0,0,0,0,0, // 80
+                                     0,0,0,0,0,0,0,0,0,0, // 90
+                                     0,0x7f,0,0,0,0,0,0,0,0}; // 100
 
-static const uint8_t _keyboard_mapping_commodore[]={0,0,0,0,0,0,0,0,0,0, // 0
-                                                0,0,0,0,0,0,0,0,0,0, // 10
-                                                0,0,0,0,0,0,0,0,0,0, // 20 
-                                                0x1c,0x05,28,0x9f,0x9c,30,158,0x0a,0x12,0x92, // 30
-                                                0,0x13,0,0,0,0,0,0,0,0, // 0x13=Home
-                                                0,0,0,0,0,0,0,0,0,0,
-                                                0,0,0,0,0,0,0,0,0,0,
-                                                0,0,0,0,0,0,0,0,0,0,
-                                                0,0,0,0,0,0,0,0,0,0,
-                                                0,0,0,0,0,0,0,0,0,0,
-                                                0,0,0,0,0,0,0,0,0,0,
-                                                0,0,0,0,0,0,0,0,0,0,
-                                                0,0,0,0,0,0,0,0,0,0,
-                                                0,0,0,0,0,0,0,0};                                                
+// X (direction of the keyboard matrix)- Columns
+static const u_int8_t keyboardMapCol[]={0,0,0,0,0xfb,0xef,0xef,0xfb,0xbf,0xdf, // 0
+                                     0xfb,0xdf,0xfd,0xfb,0xdf,0xfb,0xef,0x7f,0xbf,0xfd,    // 10
+                                     0xbf,0xfd,0xdf,0xbf,0xbf,0x7f,0xfd,0x7f,0xfd,0xef, // 20
+                                     0xfe,0xf7,0xfe,0xf7,0xfe,0xf7,0xfe,0xf7,0xfe,0xf7, // 30
+                                     0xfd,0x7f,0xfe,0xfb,0xef,0xfe,0xf7,0xbf,0xfd,0xdf, // 40 
+                                     0,0xdf,0xfb,0xfd,0x7f,0xef,0x7f,0,0xef,0xdf, // 50
+                                     0xbf,0xf7,0,0,0,0,0xbf,0xfe,0,0, // 60
+                                     0xf7,0,0,0,0,0,0,0,0,0xfb, // 70
+                                     0xfb,0x7f,0x7f,0,0,0,0,0,0,0, // 80
+                                     0,0,0,0,0,0,0,0,0,0, // 90
+                                     0,0xdf,0,0,0,0,0,0,0,0}; // 100
+
+const char *COMPETITION_PRO="Competition Pro / Speedlink";
+const char *SNES_OEM="SNES (OEM)";
+const char *UNKNOWN_STICK="Unknown Stick/Pad";
 
 Computer::Computer(Logging *pLogging)
 {
@@ -98,12 +49,31 @@ Computer::~Computer()
 int Computer::Run()
 {
   Init();
-
+  tuh_task();
   do {
-    if (m_totalCyles%30000==0)
+    if (m_totalCyles%23000==0)
     {
         tuh_task();
     }
+#ifdef _TRAPDOOR
+    static u_int8_t autostart=0;
+    if (m_totalCyles%2000000==0)
+    {
+        // Joystick present?
+        if (m_pGlue->m_pJoystickA!=nullptr && autostart==0)
+        {
+          const u_int8_t sysTrapdoor[]={'S','Y','S','2','4','6','8','8',13};
+          autostart=1;
+          memcpy(&m_pGlue->m_pRAM[631],sysTrapdoor,sizeof(sysTrapdoor));
+          m_pGlue->m_pRAM[198]=sizeof(sysTrapdoor);
+        }
+    }
+    if (autostart==1 && m_totalCyles%4000000==0)
+    {
+        autostart=2;
+        m_pGlue->m_pKeyboard->OnKeyPressed(0xfd,0xdf); // S
+    }
+#endif
     m_pGlue->Clk(HIGH,&m_systemState);
     m_pGlue->Clk(LOW,&m_systemState);
     m_totalCyles++;
@@ -127,71 +97,78 @@ int Computer::Init()
 }
 
 /**
- * Very basic keyboard processing here just to be able to play around with basic
- * and to get used to tinyUSB.
- * 
+ * Keyboard processing. We do support multiple keys pressed at the same time.
 */
 void process_kbd_report (hid_keyboard_report_t const* report)
 { 
   if (report!=nullptr) 
   {
-    if (report->keycode[0]==0 && report->modifier==0) // No key pressed
+    _pGlue->m_pKeyboard->OnKeyReleased(0,0);
+
+    if (report->modifier==0x02 || report->modifier==0x20)
     {
-      _pGlue->m_pRAM[653]=0x00;
+      // pressed one of the shift keys...
+      if (report->modifier==0x02) { // Left shift key
+        _pGlue->m_pKeyboard->OnKeyPressed(0xfd,0x7f); 
+      }
+      else // right shift key
+      {
+        _pGlue->m_pKeyboard->OnKeyPressed(0xbf,0xef); 
+      }
     }
-    else
+    int i=0;
+    while (report->keycode[i]!=0)
     {
-      if (report->modifier)
+      if (report->keycode[i]==0x40) // F7 => restore.
       {
-        if (report->modifier & 1) // Ctrl key will become Commodore key
-        {
-          _pGlue->m_pRAM[653]|=0x02;  
-          if (_keyboard_mapping_commodore[report->keycode[1]]!=0) 
-          {
-              _pGlue->m_pRAM[631]=_keyboard_mapping_commodore[report->keycode[1]];
-              _pGlue->m_pRAM[198]=1;
-          }
-        }
-        if (report->modifier & 2) // Shift key
-        {
-          _pGlue->m_pRAM[653]|=0x01;
-          if (_keyboard_mapping_shift[report->keycode[0]]!=0)
-          {
-            if (report->keycode[0]!=0) {
-              _pGlue->m_pRAM[631]=_keyboard_mapping_shift[report->keycode[0]];
-              _pGlue->m_pRAM[198]=1;
-            }
-          }
-        }
+        _pGlue->SignalNMI(true);
       }
-      else 
+      else if (report->keycode[i]<sizeof(keyboardMapRow) && keyboardMapRow[report->keycode[i]]!=0)
       {
-        if (report->keycode[0]==43) { // CTRL
-          _pGlue->m_pRAM[653]|=0x04;
-          if (_keyboard_mapping_ctrl[report->keycode[1]]!=0) 
-          {
-            _pGlue->m_pRAM[631]=_keyboard_mapping_ctrl[report->keycode[1]];
-            _pGlue->m_pRAM[198]=1;
-          }
-        }
-        else if (report->keycode[0]==41) // Run/Stop simulation
-        {
-            _pGlue->m_pRAM[631]=0x03;
-            _pGlue->m_pRAM[198]=1;
-            _pGlue->m_pRAM[0x91]=0x7f;
-        }
-        else
-        {
-          if (_keyboard_mapping[report->keycode[0]]!=0)
-          {
-            _pGlue->m_pRAM[631]=_keyboard_mapping[report->keycode[0]];
-            _pGlue->m_pRAM[198]=1;
-          }
-        }
+        _pGlue->m_pKeyboard->OnKeyPressed(keyboardMapRow[report->keycode[i]],keyboardMapCol[report->keycode[i]]); 
       }
+      i++;
     }
   }
 }
+
+const char * identifyJoystick(uint8_t dev_addr, bool& supported)
+{
+  const char *szId="";
+  uint16_t vid, pid;
+
+  tuh_vid_pid_get(dev_addr, &vid, &pid);
+  supported=true;
+ 
+  switch (vid)
+  {
+    case 0x54c:
+      if (pid==0x268)
+      {
+        szId=COMPETITION_PRO;    
+      }
+    break;
+
+    case 0x79:
+      if (pid==0x11)
+      {
+        szId=SNES_OEM;
+      }
+    break;
+
+    default:
+      szId=UNKNOWN_STICK;    
+      supported=false;
+    break;
+  }
+  return szId;
+}
+
+// Invoked when device with hid interface is mounted
+// Report descriptor is also available for use. tuh_hid_parse_report_descriptor()
+// can be used to parse common/simple enough descriptor.
+// Note: if report descriptor length > CFG_TUH_ENUMERATION_BUFSIZE, it will be skipped
+// therefore report_desc = NULL, desc_len = 0
 
 void tuh_hid_mount_cb (uint8_t dev_addr, uint8_t instance,
     uint8_t const* desc_report, uint16_t desc_len)
@@ -202,16 +179,70 @@ void tuh_hid_mount_cb (uint8_t dev_addr, uint8_t instance,
   {
     tuh_hid_receive_report (dev_addr, instance);
   }
+  else
+  {
+    bool supported;
+    const char *pId=identifyJoystick(dev_addr,supported);
+    if (supported) // TODO: Create a class factory. But for now, we only have 2 types
+    {
+      if (strcmp(pId,COMPETITION_PRO)==0)
+      {
+          if (_pGlue->m_pJoystickA!=nullptr)
+          {
+            delete _pGlue->m_pJoystickA;
+          }
+          _pGlue->m_pJoystickA=new CompetitionPro(_pGlue->m_pLog);
+      }
+      else if (strcmp(pId,SNES_OEM)==0)
+      {
+          if (_pGlue->m_pJoystickA!=nullptr)
+          {
+            delete _pGlue->m_pJoystickA;
+          }
+          _pGlue->m_pJoystickA=new SNES(_pGlue->m_pLog);
+      }
+      if (_pGlue->m_pJoystickA!=nullptr)
+      {
+        tuh_hid_receive_report(dev_addr, instance);
+      }
+    }
+  }
 }
 
-void tuh_hid_report_received_cb  (uint8_t dev_addr, uint8_t instance,uint8_t const* report, uint16_t len)
+// Invoked when device with hid interface is un-mounted
+void tuh_hid_umount_cb(uint8_t dev_addr, uint8_t instance)
 {
+
+}
+
+/**
+ * For joysticks, the report differs. I analysed the report for a simple Competition Pro
+ * first, the joystick best known by C64 fellows...
+*/
+void handleJoystick(const char *szJoystick, uint8_t const * report, uint16_t len)
+{
+  _pGlue->m_pJoystickA->Convert(report,len);
+}
+
+void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance,uint8_t const* report, uint16_t len)
+{
+  bool supported;
+  const char *szId;
   switch (tuh_hid_interface_protocol (dev_addr, instance))
   {
     case HID_ITF_PROTOCOL_KEYBOARD:
       process_kbd_report ((hid_keyboard_report_t const*) report);
       tuh_hid_receive_report (dev_addr, instance);
     break;
+
+    default:
+      szId=identifyJoystick(dev_addr, supported);
+      if (supported)
+      {
+        handleJoystick(szId, report, len);
+        tuh_hid_receive_report(dev_addr, instance);
+      }
+    break;
   }
-}
+}  
 

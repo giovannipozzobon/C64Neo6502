@@ -1,24 +1,19 @@
 /**
  * Written by Bernd Krekeler, Herne, Germany
  * 
+ * CIA#1 ($DC00) PA0-PA7: JOY0-3, BNT-4 /COL0-COL7
+ *               PB0-PB7: ROW0-ROW7
+ * 
 */
 
-#include <stdio.h>
-#include <hardware/gpio.h>
-#include <dvi.h>
-#include <dvi_serialiser.h>
-#include "logging.hxx"
-#include "rp65c02.hxx"
-#include "cia6526.hxx"
-#include "vic6569.hxx"
-#include "videoOut.hxx"
-#include "rpPetra.hxx"
+#include "stdinclude.hxx"
 
-
-CIA6526::CIA6526(Logging *pLogging, RpPetra *pGlue)
+CIA6526::CIA6526(Logging *pLogging, uint8_t id, RpPetra *pGlue)
 {
     m_pLog=pLogging;
     m_pGlue=pGlue;
+    m_registerSet[0x01]=0xff; // Pull-up setting all high.
+    m_id=id;
 }
 
 CIA6526::~CIA6526() {}
@@ -31,8 +26,7 @@ void CIA6526::Reset()
 void CIA6526::Clk() 
 {
   m_i64Clks++;
-  m_registerSet[0x01]=0xff; // No key pressed.
-
+  
   // size_t const BufferSize = 512;
   //char buffer[BufferSize];
 
@@ -69,6 +63,41 @@ void CIA6526::Clk()
 uint8_t CIA6526::ReadRegister(uint8_t reg) 
 {
   uint8_t ret = m_registerSet[reg];
+  
+  if (m_id==1) // TODO: inherit from CIABase class (CIAA, CIAB) and overwrite method instead of id-comparision.
+  {
+    if (reg==0x01 && m_registerSet[2]==0xff) //  // 0=column (port A, $02 ctrl), 1=row (port B, $03 ctrl)
+    {
+        std::vector<Keys *> keysPressed=m_pGlue->m_pKeyboard->GetKeysPressed();
+        ret=0xff;
+        if (!keysPressed.empty())
+        {        
+            if (m_registerSet[0]==0x00) // C64 is probing if any key has been pressed...
+            {
+              ret=0x20;
+            }
+            else
+            {
+              for(auto keys : keysPressed)
+              {
+                if (keys->row==m_registerSet[0])
+                {
+                  ret&=keys->col;
+                }
+              }
+            }
+        }
+        m_registerSet[1]=ret;
+    }
+    else if (reg==0x00)
+    {
+      JoystickStatus status=m_pGlue->m_pJoystickA->m_status;
+      ret=status.up+status.down*2+status.left*4+status.right*8+status.fire*16;
+      m_registerSet[0]=ret;
+    }
+  
+  }
+
   if (reg==0x0d)
   {
     if (ret & 0x80)
