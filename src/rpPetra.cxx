@@ -25,6 +25,8 @@
 
 */
 
+#define SOUND_PIN 20
+
 // static uint8_t benchmark[]={0xA9, 0x00, 0xAA, 0xA8, 0xE8, 0xD0, 0xFD,0xC8,0xD0,0xFA,0xAA,0xE8,0x8A,0xC9,0xFF,0xD0,0xF3,0x8D,0x20,0xD0,0x4C,0x04,0xE0};
 
 static char Charset[]={ '@','A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z',
@@ -35,10 +37,11 @@ RpPetra::RpPetra(Logging *pLogging, RP65C02 *pCPU)
 {
     m_pLog=pLogging;
     m_pCPU=pCPU;
-    m_pCIA1 = new CIA6526(pLogging,1, this);
-    m_pCIA2 = new CIA6526(pLogging,2, this);
+    m_pCIA1 = new CIA1(pLogging,this);
+    m_pCIA2 = new CIA2(pLogging,this);
     m_pVICII= new VIC6569(pLogging,this);
-    m_pKeyboard= new Keyboard(pLogging,this);
+    m_pKeyboard= new Keyboard(pLogging, this);
+    m_pColorRam= (uint8_t *)calloc(1000,sizeof(uint8_t));
     m_pJoystickA=nullptr;
     m_pJoystickB=nullptr;
 
@@ -65,10 +68,73 @@ RpPetra::RpPetra(Logging *pLogging, RP65C02 *pCPU)
   memcpy(&m_pRAM[0x0801],trapdoor,sizeof(trapdoor));
 #endif
 
+#ifdef _RASTERIRQ 
+  // Testbench- Rasterinterrupt line 108
+  uint8_t rasterIrq[]={0x78,0xa9,0x6c,0x8d,0x12,0xd0,0xad,0x11,0xd0,0x29,0x7f,0x8d,0x11,0xd0,
+                       0xad,0x1a,0xd0,0x09,0x01,0x8d,0x1a,0xd0,0xa9,0x24,0x8d,0x14,0x03,0xa9,
+                       0xc0,0x8d,0x15,0x03,0x58,0x60,00,00,0xad,0x19,0xd0,0x30,0x07,0xad,0x0d,
+                       0xdc,0x58,0x4c,0x31,0xea,0xee,0x21,0xd0,0xce,0x21,0xd0,0x8d,0x19,0xd0,
+                       0x68,0xa8,0x68,0xaa,0x68,0x40};  
+  memcpy(&m_pRAM[0xc000],rasterIrq,sizeof(rasterIrq));
 #endif
-    m_pVideoOut=new VideoOut(pLogging, this, m_pVICII->GetFrameBuffer());
-    Reset();
+
+#ifdef _ELITE
+  memcpy(&m_pRAM[0x4000],elite_pic_4000,sizeof(elite_pic_4000));
+  memcpy(&m_pRAM[0xc000],picldr_c000,sizeof(picldr_c000));
+#endif
+
+#ifdef _FLASHDANCE
+  memcpy(&m_pRAM[0x750d],flashdance_rom,sizeof(flashdance_rom));
+#endif
+
+#endif
+  m_pVideoOut=new VideoOut(pLogging, this, m_pVICII->GetFrameBuffer());
+  Reset();
 }
+
+/*
+  The following two procedures are taken from https://github.com/paulscottrobson/neo6502-firmware
+  and were written by Paul Robson (paul@robsons.org.uk) and Harry Fairhead.
+*/
+
+void pwm_interrupt_handler() {
+  static uint16_t buffer;
+  pwm_clear_irq(pwm_gpio_to_slice_num(SOUND_PIN));
+  SIDCalcBuffer((uint8_t*)&buffer, 2);
+  pwm_set_gpio_level(SOUND_PIN, buffer);
+}
+
+void SNDInitialise(void) {
+  SIDInit();
+  gpio_set_function(SOUND_PIN, GPIO_FUNC_PWM);
+  int audio_pin_slice = pwm_gpio_to_slice_num(SOUND_PIN);
+
+  // Setup PWM interrupt to fire when PWM cycle is complete
+  pwm_clear_irq(audio_pin_slice);
+  pwm_set_irq_enabled(audio_pin_slice, true);
+  // set the handle function above
+  irq_set_exclusive_handler(PWM_IRQ_WRAP, pwm_interrupt_handler); 
+  irq_set_enabled(PWM_IRQ_WRAP, true);
+
+  // Setup PWM for audio output
+  pwm_config config = pwm_get_default_config();
+  /* Base clock 176,000,000 Hz divide by wrap 250 then the clock divider further divides
+    * to set the interrupt rate. 
+    * 
+    * 11 KHz is fine for speech. Phone lines generally sample at 8 KHz
+    * 
+    * 
+    * So clkdiv should be as follows for given sample rate
+    *  8.0f for 11 KHz
+    *  4.0f for 22 KHz
+    *  2.0f for 44 KHz etc
+    */
+    pwm_config_set_clkdiv(&config, 23.0f); 
+    pwm_config_set_wrap(&config, 250); 
+    pwm_init(audio_pin_slice, &config, true);
+    pwm_set_gpio_level(SOUND_PIN, 0);
+}
+
 
 RpPetra::~RpPetra()
 {
@@ -92,9 +158,10 @@ void RpPetra::Reset()
   m_pCIA1->Reset();  
   m_pCIA2->Reset();  
   m_pVideoOut->Reset();
+  SIDReset(0);
+  ::SNDInitialise();
   ResetCPU();
 }
-
 
 // Note: According to the WDC the IRQB low level should be held until the interrupt handler clears 
 // the interrupt request source.
@@ -168,7 +235,7 @@ bool RpPetra::IsCharRomVisible()
 
 // In this design we use Petra's CLK == 65C02 PHI2. We may later decide
 // to use some kind of interleave factor x.
-void RpPetra::Clk(bool isRisingEdge, SYSTEMSTATE *pSystemState)
+void RpPetra::Clk(bool isRisingEdge, SYSTEMSTATE *pSystemState, uint64_t totalCycles)
 {
   int_fast16_t addr;
   //static char szBuffer[256];
@@ -183,8 +250,9 @@ void RpPetra::Clk(bool isRisingEdge, SYSTEMSTATE *pSystemState)
   ReadCPUSignals(pSystemState);      
   addr=pSystemState->cpuState.a0a15;
   m_cpuAddr=m_pRAM[1] & 0x07;
-  bool handled=false;
-
+  static bool handled;
+  
+  handled=false;
   if ((addr>=0x0000 && addr<=0x9fff) || (addr>=0xc000 && addr<=0xcfff))
   {
       handled=true;
@@ -195,74 +263,82 @@ void RpPetra::Clk(bool isRisingEdge, SYSTEMSTATE *pSystemState)
         m_pRAM[addr]=pSystemState->cpuState.d0d7;
       }
   }
-  else if (IsIOVisible())
-  {
-    if (addr>=0xd000 && addr<=0xd02e && IsIOVisible()) // VIC II
-    {
-      handled=true;
-      if (pSystemState->cpuState.readNotWrite) {   // READ access
-        //sprintf (szBuffer,"VIC-II read access: %04x\n",addr);
-        WriteDataBus(m_pVICII->m_registerSetRead[addr-0xd000]);
-      }
-      else {
-        //sprintf (szBuffer,"VIC-II write access: %04x,%02x\n",addr,pSystemState->cpuState.d0d7);
-        m_pVICII->WriteRegister(addr-0xd000,pSystemState->cpuState.d0d7);
-        m_screenUpdated=true;
-      }
-      //m_pLog->LogInfo({szBuffer});
-    }
-    else if (addr>=0xdc00 && addr<=0xdcff && IsIOVisible()) // CIA-1
-    {   
-      handled=true;
-      if (pSystemState->cpuState.readNotWrite) {   // READ access
-        //sprintf (szBuffer,"CIA1 read access: %04x\n",addr);
-        // CIA addresses are mirrored every 16 byte until dcff.
-        WriteDataBus(m_pCIA1->ReadRegister((addr-0xdc00) % 16));
-      }
-      else {
-        //sprintf (szBuffer,"CIA1 write access: %04x,%02x\n",addr,pSystemState->cpuState.d0d7);
-        m_pCIA1->WriteRegister((addr-0xdc00) % 16, pSystemState->cpuState.d0d7);
-      }
-      //m_pLog->LogInfo({szBuffer});
-    }
-    else if (addr>=0xdd00 && addr<=0xddff && IsIOVisible()) // CIA-2
-    {
-      handled=true;
-      if (pSystemState->cpuState.readNotWrite) {   // READ access
-          // CIA addresses are mirrored every 16 byte until ddff.
-        WriteDataBus(m_pCIA2->ReadRegister((addr-0xdd00) % 16));
-        //sprintf (szBuffer,"CIA2 read access: %04x\n",addr);
-      }
-      else {
-        //sprintf (szBuffer,"CIA2 write access: %04x,%02x\n",addr,pSystemState->cpuState.d0d7);
-        m_pCIA2->WriteRegister((addr-0xdd00) % 16, pSystemState->cpuState.d0d7);
-      }
-      //m_pLog->LogInfo({szBuffer});
-    }
-  }
   if (!handled)
   {
-    if (addr>=0xd000 && addr<=0xdfff)
+    if (IsIOVisible())
     {
-        if (pSystemState->cpuState.readNotWrite)  // READ 
+      if (addr>=0xd000 && addr<=0xd02e) // VICII 6569
+      {
+        handled=true;
+        if (pSystemState->cpuState.readNotWrite) {   // READ access
+          //sprintf (szBuffer,"VIC-II read access: %04x\n",addr);
+          WriteDataBus(m_pVICII->m_registerSetRead[addr-0xd000]);
+        }
+        else {
+          m_pVICII->WriteRegister(addr-0xd000,pSystemState->cpuState.d0d7);
+        }
+      }
+      else if (addr>=0xd400 && addr<=0xd41c) // SID6581/6582/8580
+      {
+        handled=true;
+        if (pSystemState->cpuState.readNotWrite) {   // READ access
+          sid_read((uint32_t)addr-0xd400, (cycle_t)totalCycles);
+        }
+        else {
+          sid_write((uint32_t)addr-0xd400,pSystemState->cpuState.d0d7);
+        }
+      } 
+      else if (addr>=0xd800 && addr<=0xdbe7) // Colorram
+      {
+        handled=true;
+        if (pSystemState->cpuState.readNotWrite) {   // READ access in colorram
+          WriteDataBus(m_pColorRam[addr-0xd800]);
+        }
+        else // write to colorram
         {
-          if (IsCharRomVisible())                  
-          {
-            // Character ROM
-            WriteDataBus(chargen_rom[addr-0xd000]);
-          }
-          else
-          {
-            WriteDataBus(m_pRAM[addr]);
-          }
+          WriteDataBus(m_pRAM[addr]);
+          m_pColorRam[addr-0xd800]=pSystemState->cpuState.d0d7;
+        }
+      }
+      else if (addr>=0xdc00 && addr<=0xdcff) // CIA-1
+      {   
+        handled=true;
+        if (pSystemState->cpuState.readNotWrite) {   // READ access
+          // CIA addresses are mirrored every 16 byte until dcff.
+          WriteDataBus(m_pCIA1->ReadRegister((addr-0xdc00) % 16));
+        }
+        else {
+          m_pCIA1->WriteRegister((addr-0xdc00) % 16, pSystemState->cpuState.d0d7);
+        }
+      }
+      else if (addr>=0xdd00 && addr<=0xddff) // CIA-2
+      {
+        handled=true;
+        if (pSystemState->cpuState.readNotWrite) {   // READ access
+          WriteDataBus(m_pCIA2->ReadRegister((addr-0xdd00) % 16));
+        }
+        else {
+          m_pCIA2->WriteRegister((addr-0xdd00) % 16, pSystemState->cpuState.d0d7);
+        }
+      }
+    }
+    if (!handled)
+    {
+      if (addr>=0xd000 && addr<=0xdfff && IsCharRomVisible())
+      {
+        handled=true;
+        if (pSystemState->cpuState.readNotWrite) {   // READ access
+          WriteDataBus(chargen_rom[addr-0xd000]);
         }
         else
         {
-          // Non IO access, so always write to RAM
-          m_pRAM[addr]=pSystemState->cpuState.d0d7;
+          WriteDataBus(m_pRAM[addr]);
         }
+      }
     }
-    else if (addr>=0xa000 && addr<=0xbfff)  // maybe basic ROM access or ram
+  if (!handled) // Regular RAM access
+  {
+    if (addr>=0xa000 && addr<=0xbfff)  // maybe basic ROM access or ram
     {
         if (pSystemState->cpuState.readNotWrite)  // READ 
         {
@@ -281,6 +357,17 @@ void RpPetra::Clk(bool isRisingEdge, SYSTEMSTATE *pSystemState)
           m_pRAM[addr]=pSystemState->cpuState.d0d7;
         }
     }
+    else if (addr>=0xd000 && addr<=0xdfff)
+    {
+        if (pSystemState->cpuState.readNotWrite)  // READ 
+        {
+          WriteDataBus(m_pRAM[addr]);
+        }
+        else
+        {
+          m_pRAM[addr]=pSystemState->cpuState.d0d7;
+        }
+    }
     else if (addr>=0xe000 && addr<=0xffff)    
     {
         if (pSystemState->cpuState.readNotWrite)  // READ 
@@ -288,29 +375,58 @@ void RpPetra::Clk(bool isRisingEdge, SYSTEMSTATE *pSystemState)
 #ifdef _NMISTART
           static int nmiStage=0;  
           bool done=false;
-          if ((addr==0xfffa || addr==0xfffb) && nmiStage<=2)
+          if ((addr==0xfffa || addr==0xfffb) && nmiStage<=4)
           {
 #ifdef _ELITE
-            uint8_t magic[]={0x68,0x68,0x68,0xa9,0x40,0x48,0xa9,0x00,0x48,0x08,0x40}; 
+            uint8_t magic[]={0x68,0x68,0x68,0xa9,0xC0,0x48,0xa9,0x00,0x48,0x08,0x40};  // $C000
+            uint8_t magic_run[]={0x68,0x68,0x68,0xa9,0x01,0x48,0xa9,0xb6,0x48,0x08,0x40};  // $01B6
 #endif            
 #ifdef _TRAPDOOR      
             uint8_t magic[]={0x68,0x68,0x68,0xa9,0x60,0x48,0xa9,0x70,0x48,0x08,0x40}; 
 #endif            
+#ifdef _FLASHDANCE 
+            uint8_t magic[]={0x78,0x48,0xa9,0xbc,0x8d,0x14,0x03,0xa9,0x75,0x8d,0x15,0x03,0xa9,0x0f,0x8d,0x18,0xd4,0x68,0x58,0x40}; 
+#endif
             if (nmiStage==0)
             {
+#ifdef _FLASHDANCE 
+              memcpy(&m_pRAM[0x033c],magic,sizeof(magic));
+#else
               memcpy(&m_pRAM[0x00ff],magic,sizeof(magic));
+#endif
+
+#ifdef _ELITE
+              memcpy(&m_pRAM[0x4000],elite_pic_4000,sizeof(elite_pic_4000));
+              memcpy(&m_pRAM[0xc000],picldr_c000,sizeof(picldr_c000));
+              memcpy(m_pColorRam,elite_d800,sizeof(elite_d800));
+#endif              
             }
-            if (nmiStage<=2)
+#ifdef _ELITE            
+            else if (nmiStage==2)
+            {
+                memcpy(&m_pRAM[0x02],elite,sizeof(elite));
+                memcpy(&m_pRAM[0x00ff],magic_run,sizeof(magic_run));
+            }
+#endif
+            if (nmiStage<=4)
             {
                 nmiStage++;
+              
+#ifdef _FLASHDANCE
+  uint8_t low=0x3c;
+  uint8_t high=0x03;
+#else              
+  uint8_t low=0xff;
+  uint8_t low=0x00;
+#endif
                 if (addr==0xfffa)
                 {
-                  WriteDataBus(0xff);    
+                  WriteDataBus(low);    
                   done=true;
                 }
                 else
                 {
-                  WriteDataBus(0x00);    
+                  WriteDataBus(high);    
                   done=true;
                 }
             }   
@@ -335,17 +451,18 @@ void RpPetra::Clk(bool isRisingEdge, SYSTEMSTATE *pSystemState)
           // Always write to RAM 
           m_pRAM[addr]=pSystemState->cpuState.d0d7;
         }
-    }
-    else  // std. RAM
-    {
-        if (pSystemState->cpuState.readNotWrite)  // READ 
-        {
-          WriteDataBus(m_pRAM[addr]);
-        }
-        else
-        {
-          m_pRAM[addr]=pSystemState->cpuState.d0d7;
-        }
+      }
+      else  // std. RAM
+      {
+          if (pSystemState->cpuState.readNotWrite)  // READ 
+          {
+            WriteDataBus(m_pRAM[addr]);
+          }
+          else
+          {
+            m_pRAM[addr]=pSystemState->cpuState.d0d7;
+          }
+      }
     }
   }
 }

@@ -5,7 +5,8 @@
 #include "stdinclude.hxx"
 
 #ifdef _ELITE
-extern uint8_t elite[];
+extern uint8_t elite[65534];
+extern uint8_t elite_d800[1000];
 #endif 
 
 // Y (direction of the keyboard matrix)- ROW
@@ -13,7 +14,7 @@ static const uint8_t keyboardMapRow[]={0,0,0,0,0xfd,0xf7,0xfb,0xfb,0xfd,0xfb, //
                                      0xf7,0xf7,0xef,0xef,0xef,0xdf,0xef,0xef,0xef,0xdf,    // 10 ("G..P")
                                      0x7f,0xfb,0xfd,0xfb,0xf7,0xf7,0xfd,0xfb,0xf7,0xfd, // 20 ("Q..Z")
                                      0x7f,0x7f,0xfd,0xfd,0xfb,0xfb,0xf7,0Xf7,0xef,0xef, // 30 ("1..0")
-                                     0xfe,0x7f,0xfe,0x7f,0x7f,0xdf,0xf7,0xdf,0xbf,0xbf, // 40 (41=RS, 44=SPC)
+                                     0xfe,0x7f,0xfe,0x7f,0x7f,0xdf,0xdf,0xdf,0xbf,0xbf, // 40 (41=RS, 44=SPC)
                                      0,0xdf,0xbf,0x7f,0xdf,0xdf,0xbf,0,0xfe,0xfe, // 50
                                      0xfe,0xfe,0,0,0,0,0xbf,0xbf,0,0, // 60
                                      0xbf,0,0,0,0,0,0,0,0,0xfe, // 70
@@ -54,24 +55,13 @@ int Computer::Run()
   Init();
   tuh_task();
   do {
-    if (m_totalCyles%23000==0)
+    if (m_totalCyles%21000==0)
     {
         tuh_task();
     }
 
-#ifdef _ELITE
-  static uint8_t elite_start=0;
-  if ((m_totalCyles+1)%2000000==0 && elite_start==0)
-  {
-    elite_start=1;
-    memcpy(&m_pGlue->m_pRAM[0x02],elite,65534);
-    m_pGlue->SignalIRQ(false);
-    m_pGlue->SignalIRQ(true);
-  }
-#endif
-
-    m_pGlue->Clk(HIGH,&m_systemState);
-    m_pGlue->Clk(LOW,&m_systemState);
+    m_pGlue->Clk(HIGH,&m_systemState,m_totalCyles);
+    m_pGlue->Clk(LOW,&m_systemState,m_totalCyles);
     m_totalCyles++;
   } while (1);
 
@@ -82,13 +72,13 @@ int Computer::Init()
 {
   board_init();
   tusb_init();  
+  SIDInit();
 
+  _pGlue=m_pGlue;
   // Create the CPU
   m_pCPU= new RP65C02(m_pLogging);
   // Create the Petra custom chip (glue logic)
   m_pGlue= new RpPetra(m_pLogging, m_pCPU);
-  _pGlue=m_pGlue;
-
   return 0;
 }
 
