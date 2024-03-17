@@ -48,12 +48,11 @@ class RpPetra {
     Keyboard *m_pKeyboard;
     Joysticks *m_pJoystickA;
     Joysticks *m_pJoystickB; // Not yet.
-
+    uint8_t *m_pColorRam;
   private:
     RP65C02 *m_pCPU;
     VideoOut *m_pVideoOut;
     uint8_t m_cpuAddr;
-
     void Enable_U5_only() { gpio_put_masked(pioMaskOE_U5_U6_U7, enableU5Only); };  
     void Enable_U6_only() { gpio_put_masked(pioMaskOE_U5_U6_U7, enableU6Only); };  
     void Enable_U7_only() { gpio_put_masked(pioMaskOE_U5_U6_U7, enableU7Only); };  
@@ -72,7 +71,7 @@ class RpPetra {
   public:
     bool m_screenUpdated;
 
-    void Clk(bool isRisingEdge, SYSTEMSTATE *pSystemState);
+    void Clk(bool isRisingEdge, SYSTEMSTATE *pSystemState, uint64_t totalCycles);
     RpPetra(Logging *pLogging, RP65C02 *pCpu);
     void SignalIRQ(bool enable);
     void SignalNMI(bool enable);

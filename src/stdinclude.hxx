@@ -10,6 +10,7 @@
 #include <hardware/resets.h>
 #include <hardware/vreg.h>
 #include <hardware/structs/bus_ctrl.h>
+#include <hardware/pwm.h>
 #include <pico/stdlib.h>
 #include <pico/multicore.h>
 #include <pico/time.h>
@@ -23,7 +24,10 @@
 #include "logging.hxx"
 #include "rp65c02.hxx"
 #include "cia6526.hxx"
+#include "cia1.hxx"
+#include "cia2.hxx"
 #include "vic6569.hxx"
+#include "sid/sid.h"
 #include "videoOut.hxx"
 #include "keyboard.hxx"
 #include "joysticks.hxx"
