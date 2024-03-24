@@ -64,7 +64,6 @@ int Computer::Run()
     m_pGlue->Clk(LOW,&m_systemState,m_totalCyles);
     m_totalCyles++;
   } while (1);
-
   return (0);
 }
 
@@ -107,6 +106,7 @@ void process_kbd_report (hid_keyboard_report_t const* report)
     {
       if (report->keycode[i]==0x40) // F7 => restore.
       {
+        sleep_ms(1000); // better feeling ;-)
         _pGlue->SignalNMI(false);
         _pGlue->SignalNMI(true);
       }
